@@ -1,9 +1,10 @@
 mod base64;
+mod score;
 
+use std::convert;
 use std::fmt;
-use std::ops;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Buffer {
     bytes: Vec<u8>,
 }
@@ -12,6 +13,17 @@ impl Buffer {
     fn from_hex(hex: &str) -> Self {
         Self {
             bytes: hex::decode(hex).expect("invalid hex input"),
+        }
+    }
+
+    fn xor<T: AsRef<[u8]>>(&self, key: T) -> Self {
+        Self {
+            bytes: self
+                .bytes
+                .iter()
+                .zip(key.as_ref().iter().cycle())
+                .map(|(a, b)| a ^ b)
+                .collect(),
         }
     }
 
@@ -24,36 +36,37 @@ impl Buffer {
     }
 }
 
+impl convert::AsRef<[u8]> for Buffer {
+    fn as_ref(&self) -> &[u8] {
+        &self.bytes
+    }
+}
+
 impl fmt::Display for Buffer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", String::from_utf8_lossy(&self.bytes))
     }
 }
 
-impl ops::BitXor for Buffer {
-    type Output = Self;
+fn main() {
+    let input = "1b37373331363f78151b7f2b783431333d78397828372d363c78373e783a393b3736";
+    let buffer = Buffer::from_hex(input);
 
-    fn bitxor(self, rhs: Self) -> Self::Output {
-        Self {
-            bytes: self
-                .bytes
-                .into_iter()
-                .zip(rhs.bytes.into_iter())
-                .map(|(a, b)| a ^ b)
-                .collect(),
+    let mut best_key = 0u8;
+    let mut best_penalty = score::english_text_frequency(buffer.xor([0]).as_ref());
+
+    for i in 1..u8::MAX {
+        let text = buffer.xor([i]);
+        let penalty = score::english_text_frequency(text.as_ref());
+
+        if penalty < best_penalty {
+            best_penalty = penalty;
+            best_key = i;
         }
     }
-}
 
-fn main() {
-    let b1 = Buffer::from_hex("1c0111001f010100061a024b53535009181c");
-    let b2 = Buffer::from_hex("686974207468652062756c6c277320657965");
+    let clear = buffer.xor([best_key]);
 
-    println!("{}", b1);
-    println!("{}", b2);
-
-    let xor = b1 ^ b2;
-
-    println!("{}", xor.as_hex());
-    println!("{}", xor);
+    println!("{}", clear.as_hex());
+    println!("{}", clear);
 }
