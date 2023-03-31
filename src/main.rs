@@ -11,6 +11,12 @@ struct Buffer {
 }
 
 impl Buffer {
+    fn new(bytes: &[u8]) -> Self {
+        Self {
+            bytes: bytes.to_vec(),
+        }
+    }
+
     fn from_hex(hex: &str) -> Self {
         Self {
             bytes: hex::decode(hex).expect("invalid hex input"),
@@ -67,26 +73,10 @@ fn best_one_byte_xor(buffer: &Buffer) -> (u8, f64) {
 }
 
 fn main() {
-    let file_content = fs::read_to_string("4.txt").unwrap();
+    let input = b"Burning 'em, if you ain't quick and nimble\nI go crazy when I hear a cymbal";
+    let clear = Buffer::new(input);
 
-    let mut best_line = "";
-    let mut best_key = 0;
-    let mut best_penalty = 1000.0;
+    let cipher = clear.xor(b"ICE");
 
-    for line in file_content.lines() {
-        let buffer = Buffer::from_hex(line);
-
-        let (key, penalty) = best_one_byte_xor(&buffer);
-
-        if penalty < best_penalty {
-            best_penalty = penalty;
-            best_key = key;
-            best_line = line;
-        }
-    }
-
-    let clear = Buffer::from_hex(best_line).xor([best_key]);
-
-    println!("{}", clear.as_hex());
-    println!("{}", clear);
+    println!("{}", cipher.as_hex());
 }
