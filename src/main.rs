@@ -3,6 +3,7 @@ mod score;
 
 use std::convert;
 use std::fmt;
+use std::fs;
 
 #[derive(Debug, Clone)]
 struct Buffer {
@@ -48,24 +49,43 @@ impl fmt::Display for Buffer {
     }
 }
 
-fn main() {
-    let input = "1b37373331363f78151b7f2b783431333d78397828372d363c78373e783a393b3736";
-    let buffer = Buffer::from_hex(input);
-
+fn best_one_byte_xor(buffer: &Buffer) -> (u8, f64) {
     let mut best_key = 0u8;
     let mut best_penalty = score::english_text_frequency(buffer.xor([0]).as_ref());
 
-    for i in 1..u8::MAX {
-        let text = buffer.xor([i]);
+    for k in 1..u8::MAX {
+        let text = buffer.xor([k]);
         let penalty = score::english_text_frequency(text.as_ref());
 
         if penalty < best_penalty {
             best_penalty = penalty;
-            best_key = i;
+            best_key = k;
         }
     }
 
-    let clear = buffer.xor([best_key]);
+    (best_key, best_penalty)
+}
+
+fn main() {
+    let file_content = fs::read_to_string("4.txt").unwrap();
+
+    let mut best_line = "";
+    let mut best_key = 0;
+    let mut best_penalty = 1000.0;
+
+    for line in file_content.lines() {
+        let buffer = Buffer::from_hex(line);
+
+        let (key, penalty) = best_one_byte_xor(&buffer);
+
+        if penalty < best_penalty {
+            best_penalty = penalty;
+            best_key = key;
+            best_line = line;
+        }
+    }
+
+    let clear = Buffer::from_hex(best_line).xor([best_key]);
 
     println!("{}", clear.as_hex());
     println!("{}", clear);
