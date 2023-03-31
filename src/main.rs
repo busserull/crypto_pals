@@ -1,6 +1,7 @@
 mod base64;
 
 use std::fmt;
+use std::ops;
 
 #[derive(Debug)]
 struct Buffer {
@@ -14,6 +15,10 @@ impl Buffer {
         }
     }
 
+    fn as_hex(&self) -> String {
+        hex::encode(&self.bytes)
+    }
+
     fn as_base64(&self) -> String {
         base64::encode(&self.bytes)
     }
@@ -25,11 +30,30 @@ impl fmt::Display for Buffer {
     }
 }
 
-fn main() {
-    let input = "49276d206b696c6c696e6720796f757220627261696e206c696b65206120706f69736f6e6f7573206d757368726f6f6d";
-    let buffer = Buffer::from_hex(input);
+impl ops::BitXor for Buffer {
+    type Output = Self;
 
-    println!("{}", input);
-    println!("{}", buffer.as_base64());
-    println!("{}", buffer);
+    fn bitxor(self, rhs: Self) -> Self::Output {
+        Self {
+            bytes: self
+                .bytes
+                .into_iter()
+                .zip(rhs.bytes.into_iter())
+                .map(|(a, b)| a ^ b)
+                .collect(),
+        }
+    }
+}
+
+fn main() {
+    let b1 = Buffer::from_hex("1c0111001f010100061a024b53535009181c");
+    let b2 = Buffer::from_hex("686974207468652062756c6c277320657965");
+
+    println!("{}", b1);
+    println!("{}", b2);
+
+    let xor = b1 ^ b2;
+
+    println!("{}", xor.as_hex());
+    println!("{}", xor);
 }
