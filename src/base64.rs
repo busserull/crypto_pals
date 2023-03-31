@@ -1,3 +1,5 @@
+use std::iter;
+
 pub fn encode(bytes: &[u8]) -> String {
     let padding = match bytes.len() % 3 {
         1 => vec!['=', '='],
@@ -14,6 +16,17 @@ pub fn encode(bytes: &[u8]) -> String {
         .collect()
 }
 
+pub fn decode(base64: &str) -> Vec<u8> {
+    base64
+        .chars()
+        .filter_map(decode_single)
+        .fold(
+            OctetBuilder::with_sextet_capacity(base64.len()),
+            |acc, sextet| acc.add(sextet),
+        )
+        .bytes()
+}
+
 fn encode_single(index: u8) -> char {
     match index {
         0..=25 => char::from_u32('A' as u32 + index as u32).unwrap(),
@@ -28,9 +41,21 @@ fn encode_single(index: u8) -> char {
     }
 }
 
+fn decode_single(point: char) -> Option<u8> {
+    match point {
+        'A'..='Z' => Some((point as u32 - 'A' as u32) as u8),
+        'a'..='z' => Some((point as u32 - 'a' as u32) as u8 + 26),
+        '0'..='9' => Some((point as u32 - '0' as u32) as u8 + 52),
+        '+' => Some(62),
+        '/' => Some(63),
+        '=' => None,
+        _ => panic!("cannot decode `{}` as base64", point),
+    }
+}
+
 struct SextetIter<'a> {
     bytes: std::slice::Iter<'a, u8>,
-    step: SextetStep,
+    step: EncodeDecodeStep,
     last: u8,
     end: bool,
 }
@@ -39,7 +64,7 @@ impl<'a> SextetIter<'a> {
     fn from(bytes: &'a [u8]) -> Self {
         Self {
             bytes: bytes.iter(),
-            step: SextetStep::First,
+            step: EncodeDecodeStep::First,
             last: 0,
             end: false,
         }
@@ -47,27 +72,27 @@ impl<'a> SextetIter<'a> {
 
     fn grab_next_byte(&mut self) -> Option<(u8, u8)> {
         match self.step {
-            SextetStep::First => self
+            EncodeDecodeStep::First => self
                 .bytes
                 .next()
                 .map(|byte| (byte >> 2, byte & 0b0000_0011)),
 
-            SextetStep::Second => self
+            EncodeDecodeStep::Second => self
                 .bytes
                 .next()
                 .map(|byte| (byte >> 4, byte & 0b0000_1111)),
 
-            SextetStep::Third => self
+            EncodeDecodeStep::Third => self
                 .bytes
                 .next()
                 .map(|byte| (byte >> 6, byte & 0b0011_1111)),
 
-            SextetStep::Fourth => unreachable!(),
+            EncodeDecodeStep::Fourth => unreachable!(),
         }
     }
 }
 
-impl<'a> std::iter::Iterator for SextetIter<'a> {
+impl<'a> iter::Iterator for SextetIter<'a> {
     type Item = u8;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -76,7 +101,7 @@ impl<'a> std::iter::Iterator for SextetIter<'a> {
         }
 
         let sextet = match self.step {
-            SextetStep::First => match self.grab_next_byte() {
+            EncodeDecodeStep::First => match self.grab_next_byte() {
                 Some((head, tail)) => {
                     let sextet = head;
                     self.last = tail;
@@ -90,7 +115,7 @@ impl<'a> std::iter::Iterator for SextetIter<'a> {
                 }
             },
 
-            SextetStep::Second => match self.grab_next_byte() {
+            EncodeDecodeStep::Second => match self.grab_next_byte() {
                 Some((head, tail)) => {
                     let sextet = self.last << 4 | head;
                     self.last = tail;
@@ -104,7 +129,7 @@ impl<'a> std::iter::Iterator for SextetIter<'a> {
                 }
             },
 
-            SextetStep::Third => match self.grab_next_byte() {
+            EncodeDecodeStep::Third => match self.grab_next_byte() {
                 Some((head, tail)) => {
                     let sextet = self.last << 2 | head;
                     self.last = tail;
@@ -118,7 +143,7 @@ impl<'a> std::iter::Iterator for SextetIter<'a> {
                 }
             },
 
-            SextetStep::Fourth => Some(self.last),
+            EncodeDecodeStep::Fourth => Some(self.last),
         };
 
         self.step = self.step.next();
@@ -127,15 +152,61 @@ impl<'a> std::iter::Iterator for SextetIter<'a> {
     }
 }
 
+struct OctetBuilder {
+    bytes: Vec<u8>,
+    step: EncodeDecodeStep,
+    last: u8,
+}
+
+impl OctetBuilder {
+    fn with_sextet_capacity(sextets: usize) -> Self {
+        Self {
+            bytes: Vec::with_capacity(sextets * 3 / 4 + 1),
+            step: EncodeDecodeStep::First,
+            last: 0,
+        }
+    }
+
+    fn add(mut self, sextet: u8) -> Self {
+        match self.step {
+            EncodeDecodeStep::First => {
+                self.last = sextet << 2;
+            }
+
+            EncodeDecodeStep::Second => {
+                self.bytes.push(self.last | sextet >> 4);
+                self.last = (sextet & 0b0000_1111) << 4;
+            }
+
+            EncodeDecodeStep::Third => {
+                self.bytes.push(self.last | sextet >> 2);
+                self.last = (sextet & 0b0000_0011) << 6;
+            }
+
+            EncodeDecodeStep::Fourth => {
+                self.bytes.push(self.last | sextet);
+            }
+        }
+
+        self.step = self.step.next();
+
+        self
+    }
+
+    fn bytes(mut self) -> Vec<u8> {
+        self.bytes
+    }
+}
+
 #[derive(Clone, Copy)]
-enum SextetStep {
+enum EncodeDecodeStep {
     First,
     Second,
     Third,
     Fourth,
 }
 
-impl SextetStep {
+impl EncodeDecodeStep {
     fn next(self) -> Self {
         match self {
             Self::First => Self::Second,
@@ -203,30 +274,58 @@ mod tests {
     }
 
     #[test]
-    fn base64_three_letters() {
+    fn base64_encode_three_letters() {
         assert_eq!(encode(b"Man"), String::from("TWFu"));
     }
 
     #[test]
-    fn base64_two_letters() {
+    fn base64_encode_two_letters() {
         assert_eq!(encode(b"Ma"), String::from("TWE="));
     }
 
     #[test]
-    fn base64_one_letter() {
+    fn base64_encode_one_letter() {
         assert_eq!(encode(b"M"), String::from("TQ=="));
     }
 
     #[test]
-    fn base64_zero_letters() {
+    fn base64_encode_zero_letters() {
         assert_eq!(encode(b""), String::from(""));
     }
 
     #[test]
-    fn base64_sentence() {
+    fn base64_encode_sentence() {
         assert_eq!(
             encode(b"Many hands make light work."),
             String::from("TWFueSBoYW5kcyBtYWtlIGxpZ2h0IHdvcmsu")
+        );
+    }
+
+    #[test]
+    fn base64_decode_three_letters() {
+        assert_eq!(decode("TWFu"), b"Man");
+    }
+
+    #[test]
+    fn base64_decode_two_letters() {
+        assert_eq!(decode("TWE="), b"Ma");
+    }
+
+    #[test]
+    fn base64_decode_one_letter() {
+        assert_eq!(decode("TQ=="), b"M");
+    }
+
+    #[test]
+    fn base64_decode_zero_letters() {
+        assert_eq!(decode(""), b"");
+    }
+
+    #[test]
+    fn base64_decode_sentence() {
+        assert_eq!(
+            decode("TWFueSBoYW5kcyBtYWtlIGxpZ2h0IHdvcmsu"),
+            b"Many hands make light work."
         );
     }
 }

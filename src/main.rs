@@ -1,9 +1,14 @@
 mod base64;
+mod gliding_slice;
+mod result_keeper;
 mod score;
 
 use std::convert;
 use std::fmt;
 use std::fs;
+
+use gliding_slice::GlidingSlice;
+use result_keeper::ResultKeeper;
 
 #[derive(Debug, Clone)]
 struct Buffer {
@@ -23,6 +28,12 @@ impl Buffer {
         }
     }
 
+    fn from_base64(base64: &str) -> Self {
+        Self {
+            bytes: base64::decode(base64),
+        }
+    }
+
     fn xor<T: AsRef<[u8]>>(&self, key: T) -> Self {
         Self {
             bytes: self
@@ -32,6 +43,44 @@ impl Buffer {
                 .map(|(a, b)| a ^ b)
                 .collect(),
         }
+    }
+
+    fn xor_repeating_key_search(&self, size: usize) -> Option<f64> {
+        if size > self.bytes.len() / 2 {
+            return None;
+        }
+
+        let (chunks, distances) = GlidingSlice::new(&self.bytes, size).into_iter().fold(
+            (1, 0.0),
+            |(chunks, acc), (one, two)| {
+                let distance = hamming_distance(one, two) as f64 / size as f64;
+                (chunks + 1, acc + distance)
+            },
+        );
+
+        Some(distances / chunks as f64)
+    }
+
+    fn transpose(&self, size: usize) -> Vec<Self> {
+        let size = std::cmp::min(size, self.bytes.len());
+
+        let mut rows = vec![
+            Self {
+                bytes: Vec::with_capacity(self.bytes.len() / size)
+            };
+            size
+        ];
+
+        for (row, byte) in self
+            .bytes
+            .iter()
+            .enumerate()
+            .map(|(i, byte)| (i % size, byte))
+        {
+            rows[row].bytes.push(*byte);
+        }
+
+        rows
     }
 
     fn as_hex(&self) -> String {
@@ -72,11 +121,39 @@ fn best_one_byte_xor(buffer: &Buffer) -> (u8, f64) {
     (best_key, best_penalty)
 }
 
+fn hamming_distance(one: &[u8], two: &[u8]) -> usize {
+    one.iter()
+        .zip(two.iter())
+        .map(|(a, b)| (a ^ b).count_ones() as usize)
+        .sum()
+}
+
 fn main() {
-    let input = b"Burning 'em, if you ain't quick and nimble\nI go crazy when I hear a cymbal";
-    let clear = Buffer::new(input);
+    let file_content = fs::read_to_string("6.txt")
+        .unwrap()
+        .chars()
+        .filter(|ch| *ch != '\n')
+        .collect::<String>();
 
-    let cipher = clear.xor(b"ICE");
+    let cipher = Buffer::from_base64(&file_content);
 
-    println!("{}", cipher.as_hex());
+    let mut key_lengths = ResultKeeper::new(1);
+
+    for key_size in 2..=40 {
+        key_lengths.add(cipher.xor_repeating_key_search(key_size).unwrap(), key_size);
+    }
+
+    for key_size in key_lengths {
+        let rows = cipher.transpose(key_size);
+        let best_key: Vec<u8> = rows.iter().map(|row| best_one_byte_xor(row).0).collect();
+
+        let key = Buffer::new(&best_key);
+
+        println!("{}", key.as_hex());
+        println!("{}\n", key);
+
+        let clear = cipher.xor(&key);
+
+        println!("{}", clear);
+    }
 }
