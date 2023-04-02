@@ -83,6 +83,27 @@ impl Buffer {
         rows
     }
 
+    fn count_identical_runs(&self, run_length: usize) -> usize {
+        if run_length > self.bytes.len() {
+            return 0;
+        }
+
+        let mut runs = 0;
+
+        for start in 0..self.bytes.len() - run_length - 2 {
+            for compare_start in start + 1..self.bytes.len() - run_length - 1 {
+                let template = &self.bytes[start..start + run_length];
+                let compare = &self.bytes[compare_start..compare_start + run_length];
+
+                if template == compare {
+                    runs += 1;
+                }
+            }
+        }
+
+        runs
+    }
+
     fn as_hex(&self) -> String {
         hex::encode(&self.bytes)
     }
@@ -129,22 +150,17 @@ fn hamming_distance(one: &[u8], two: &[u8]) -> usize {
 }
 
 fn main() {
-    let file_content = fs::read_to_string("7.txt")
-        .unwrap()
-        .chars()
-        .filter(|ch| *ch != '\n')
-        .collect::<String>();
+    let file_content = fs::read_to_string("8.txt").unwrap();
 
-    let cipher_text = Buffer::from_base64(&file_content);
+    let mut keeper = ResultKeeper::new(3);
 
-    let key = b"YELLOW SUBMARINE";
+    for cipher in file_content.lines() {
+        let buffer = Buffer::from_hex(cipher);
 
-    let cipher_type = openssl::symm::Cipher::aes_128_ecb();
+        keeper.add(1.0 / (1.0 + buffer.count_identical_runs(16) as f64), cipher);
+    }
 
-    let clear = openssl::symm::decrypt(cipher_type, key, None, cipher_text.as_ref())
-        .expect("failed to decrypt");
+    let ecb = Buffer::from_hex(keeper.best().unwrap());
 
-    let buffer = Buffer::new(&clear);
-
-    println!("{}", buffer);
+    println!("{}", ecb.as_hex());
 }
