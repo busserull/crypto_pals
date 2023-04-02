@@ -129,31 +129,22 @@ fn hamming_distance(one: &[u8], two: &[u8]) -> usize {
 }
 
 fn main() {
-    let file_content = fs::read_to_string("6.txt")
+    let file_content = fs::read_to_string("7.txt")
         .unwrap()
         .chars()
         .filter(|ch| *ch != '\n')
         .collect::<String>();
 
-    let cipher = Buffer::from_base64(&file_content);
+    let cipher_text = Buffer::from_base64(&file_content);
 
-    let mut key_lengths = ResultKeeper::new(1);
+    let key = b"YELLOW SUBMARINE";
 
-    for key_size in 2..=40 {
-        key_lengths.add(cipher.xor_repeating_key_search(key_size).unwrap(), key_size);
-    }
+    let cipher_type = openssl::symm::Cipher::aes_128_ecb();
 
-    for key_size in key_lengths {
-        let rows = cipher.transpose(key_size);
-        let best_key: Vec<u8> = rows.iter().map(|row| best_one_byte_xor(row).0).collect();
+    let clear = openssl::symm::decrypt(cipher_type, key, None, cipher_text.as_ref())
+        .expect("failed to decrypt");
 
-        let key = Buffer::new(&best_key);
+    let buffer = Buffer::new(&clear);
 
-        println!("{}", key.as_hex());
-        println!("{}\n", key);
-
-        let clear = cipher.xor(&key);
-
-        println!("{}", clear);
-    }
+    println!("{}", buffer);
 }

@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 hex = "0.4.3"
 lazy_static = "1.4.0"
+openssl = "0.10.49"
