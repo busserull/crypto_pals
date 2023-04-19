@@ -35,7 +35,7 @@ fn encode_single(index: u8) -> char {
         62 => '+',
         63 => '/',
         _ => panic!(
-            "cannot encode `{}` as a base64 character; must be in range [0, 63]",
+            "cannot encode {:?} as a base64 character; must be in range [0, 63]",
             index
         ),
     }
@@ -49,7 +49,7 @@ fn decode_single(point: char) -> Option<u8> {
         '+' => Some(62),
         '/' => Some(63),
         '=' => None,
-        _ => panic!("cannot decode `{}` as base64", point),
+        _ => panic!("cannot decode {:?} as base64", point),
     }
 }
 

@@ -118,6 +118,74 @@ impl Buffer {
     fn as_base64(&self) -> String {
         base64::encode(&self.bytes)
     }
+
+    fn aes_128_cbc_encrypt(&self, key: &[u8], iv: &[u8]) -> Self {
+        let plaintext_blocks = self
+            .bytes
+            .chunks(16)
+            .map(|bytes| {
+                let mut block = Self::new(bytes);
+                block.pad(16);
+                block
+            })
+            .collect::<Vec<_>>();
+
+        let ecb = openssl::symm::Cipher::aes_128_ecb();
+
+        let mut last_cipher_block = Self::new(iv);
+        let mut ciphertext = Vec::with_capacity(16 * plaintext_blocks.len());
+
+        for block in plaintext_blocks.into_iter() {
+            let combined = block.xor(last_cipher_block);
+            let mut encrypted = openssl::symm::encrypt(ecb, key, None, combined.as_ref())
+                .expect("failed to encrypt");
+
+            encrypted.truncate(16);
+
+            ciphertext.extend(&encrypted);
+            last_cipher_block = Self { bytes: encrypted };
+        }
+
+        Self { bytes: ciphertext }
+    }
+
+    fn aes_128_cbc_decrypt(&self, key: &[u8], iv: &[u8]) -> Self {
+        assert!(self.bytes.len() % 16 == 0, "padding error");
+
+        let ciphertext_blocks = self
+            .bytes
+            .chunks_exact(16)
+            .map(Self::new)
+            .collect::<Vec<_>>();
+
+        let mut crypter = openssl::symm::Crypter::new(
+            openssl::symm::Cipher::aes_128_ecb(),
+            openssl::symm::Mode::Decrypt,
+            key,
+            None,
+        )
+        .unwrap();
+
+        crypter.pad(false);
+
+        let mut last_cipher_block = Self::new(iv);
+        let mut buffer = [0; 32];
+        let mut cleartext = Vec::with_capacity(self.bytes.len());
+
+        for block in ciphertext_blocks.into_iter() {
+            crypter
+                .update(block.as_ref(), &mut buffer)
+                .expect("failed to decrypt");
+
+            let combined = Self::new(&buffer[0..16]);
+            let decrypted = combined.xor(last_cipher_block);
+
+            cleartext.extend(decrypted.as_ref());
+            last_cipher_block = block;
+        }
+
+        Self { bytes: cleartext }
+    }
 }
 
 impl convert::AsRef<[u8]> for Buffer {
@@ -157,8 +225,18 @@ fn hamming_distance(one: &[u8], two: &[u8]) -> usize {
 }
 
 fn main() {
-    let mut buffer = Buffer::new(b"YELLOW SUBMARINE");
-    buffer.pad(20);
+    let file_content = fs::read_to_string("10.txt")
+        .unwrap()
+        .chars()
+        .filter(|ch| *ch != '\n')
+        .collect::<String>();
 
-    println!("{:?}", buffer);
+    let ciphertext = Buffer::from_base64(&file_content);
+
+    let key = b"YELLOW SUBMARINE";
+    let iv = vec![0; 16];
+
+    let cleartext = ciphertext.aes_128_cbc_decrypt(key, &iv);
+
+    println!("{}", cleartext);
 }
