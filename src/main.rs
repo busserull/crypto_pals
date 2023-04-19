@@ -34,6 +34,13 @@ impl Buffer {
         }
     }
 
+    fn pad(&mut self, buffer_size: usize) {
+        if buffer_size > self.bytes.len() {
+            let pad_size = buffer_size - self.bytes.len();
+            self.bytes.extend(vec![pad_size as u8; pad_size]);
+        }
+    }
+
     fn xor<T: AsRef<[u8]>>(&self, key: T) -> Self {
         Self {
             bytes: self
@@ -150,17 +157,8 @@ fn hamming_distance(one: &[u8], two: &[u8]) -> usize {
 }
 
 fn main() {
-    let file_content = fs::read_to_string("8.txt").unwrap();
+    let mut buffer = Buffer::new(b"YELLOW SUBMARINE");
+    buffer.pad(20);
 
-    let mut keeper = ResultKeeper::new(3);
-
-    for cipher in file_content.lines() {
-        let buffer = Buffer::from_hex(cipher);
-
-        keeper.add(1.0 / (1.0 + buffer.count_identical_runs(16) as f64), cipher);
-    }
-
-    let ecb = Buffer::from_hex(keeper.best().unwrap());
-
-    println!("{}", ecb.as_hex());
+    println!("{:?}", buffer);
 }
