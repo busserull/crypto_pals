@@ -1,5 +1,7 @@
 mod base64;
+mod crypto;
 mod gliding_slice;
+mod linux_random;
 mod result_keeper;
 mod score;
 
@@ -38,6 +40,21 @@ impl Buffer {
         if buffer_size > self.bytes.len() {
             let pad_size = buffer_size - self.bytes.len();
             self.bytes.extend(vec![pad_size as u8; pad_size]);
+        }
+    }
+
+    fn unpad(&mut self) {
+        let last = self.bytes.last().copied().unwrap_or_default();
+
+        let count = self
+            .bytes
+            .iter()
+            .rev()
+            .take_while(|byte| **byte == last)
+            .count();
+
+        if count == last as usize {
+            self.bytes.truncate(self.bytes.len() - count);
         }
     }
 
@@ -117,6 +134,18 @@ impl Buffer {
 
     fn as_base64(&self) -> String {
         base64::encode(&self.bytes)
+    }
+
+    fn aes_128_ecb_encrypt(&self, key: &[u8]) -> Self {
+        Self {
+            bytes: crypto::aes_128_ecb_encrypt(key, &self.bytes),
+        }
+    }
+
+    fn aes_128_ecb_decrypt(&self, key: &[u8]) -> Self {
+        Self {
+            bytes: crypto::aes_128_ecb_decrypt(key, &self.bytes),
+        }
     }
 
     fn aes_128_cbc_encrypt(&self, key: &[u8], iv: &[u8]) -> Self {
@@ -224,19 +253,43 @@ fn hamming_distance(one: &[u8], two: &[u8]) -> usize {
         .sum()
 }
 
+fn encryption_oracle(plaintext: &[u8]) -> (bool, Buffer) {
+    let pool = linux_random::random(55);
+
+    let key = &pool[0..16];
+    let use_ecb = pool[16] % 2 == 0;
+    let pre_count = 5 + pool[17] % 6;
+    let post_count = 5 + pool[18] % 6;
+    let pre = &pool[19..19 + pre_count as usize];
+    let post = &pool[29..29 + post_count as usize];
+    let iv = &pool[39..55];
+
+    let input = Buffer {
+        bytes: pre
+            .iter()
+            .copied()
+            .chain(plaintext.iter().copied())
+            .chain(post.iter().copied())
+            .collect(),
+    };
+
+    if use_ecb {
+        (true, input.aes_128_ecb_encrypt(key))
+    } else {
+        (false, input.aes_128_cbc_encrypt(key, iv))
+    }
+}
+
 fn main() {
-    let file_content = fs::read_to_string("10.txt")
-        .unwrap()
-        .chars()
-        .filter(|ch| *ch != '\n')
-        .collect::<String>();
+    let detected_correctly = (0..250)
+        .into_iter()
+        .map(|_| encryption_oracle(&[b'a'; 64]))
+        .all(|(ecb_used, ciphertext)| {
+            let detected_ecb = ciphertext.count_identical_runs(16) > 10;
+            ecb_used == detected_ecb
+        });
 
-    let ciphertext = Buffer::from_base64(&file_content);
-
-    let key = b"YELLOW SUBMARINE";
-    let iv = vec![0; 16];
-
-    let cleartext = ciphertext.aes_128_cbc_decrypt(key, &iv);
-
-    println!("{}", cleartext);
+    if detected_correctly {
+        println!("Oracle detects correctly");
+    }
 }
