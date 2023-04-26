@@ -5,6 +5,7 @@ mod linux_random;
 mod result_keeper;
 mod score;
 
+use lazy_static::lazy_static;
 use std::convert;
 use std::fmt;
 use std::fs;
@@ -56,6 +57,10 @@ impl Buffer {
         if count == last as usize {
             self.bytes.truncate(self.bytes.len() - count);
         }
+    }
+
+    fn len(&self) -> usize {
+        self.bytes.len()
     }
 
     fn xor<T: AsRef<[u8]>>(&self, key: T) -> Self {
@@ -253,43 +258,77 @@ fn hamming_distance(one: &[u8], two: &[u8]) -> usize {
         .sum()
 }
 
-fn encryption_oracle(plaintext: &[u8]) -> (bool, Buffer) {
-    let pool = linux_random::random(55);
+fn encryption_oracle(plaintext: &[u8]) -> Buffer {
+    lazy_static! {
+        static ref SECRET: Buffer = Buffer::from_base64(
+            "Um9sbGluJyBpbiBteSA1LjAKV2l0aCBteSByYWctdG9wIGRvd24gc28gbXkg\
+            aGFpciBjYW4gYmxvdwpUaGUgZ2lybGllcyBvbiBzdGFuZGJ5IHdhdmluZyBq\
+            dXN0IHRvIHNheSBoaQpEaWQgeW91IHN0b3A/IE5vLCBJIGp1c3QgZHJvdmUg\
+            YnkK",
+        );
+    }
 
-    let key = &pool[0..16];
-    let use_ecb = pool[16] % 2 == 0;
-    let pre_count = 5 + pool[17] % 6;
-    let post_count = 5 + pool[18] % 6;
-    let pre = &pool[19..19 + pre_count as usize];
-    let post = &pool[29..29 + post_count as usize];
-    let iv = &pool[39..55];
+    lazy_static! {
+        static ref KEY: Vec<u8> = linux_random::random(16);
+    }
 
-    let input = Buffer {
-        bytes: pre
-            .iter()
-            .copied()
-            .chain(plaintext.iter().copied())
-            .chain(post.iter().copied())
-            .collect(),
-    };
-
-    if use_ecb {
-        (true, input.aes_128_ecb_encrypt(key))
-    } else {
-        (false, input.aes_128_cbc_encrypt(key, iv))
+    Buffer {
+        bytes: openssl::symm::encrypt(
+            openssl::symm::Cipher::aes_128_ecb(),
+            &KEY,
+            None,
+            &plaintext
+                .iter()
+                .copied()
+                .chain(SECRET.bytes.iter().copied())
+                .collect::<Vec<u8>>(),
+        )
+        .unwrap(),
     }
 }
 
 fn main() {
-    let detected_correctly = (0..250)
-        .into_iter()
-        .map(|_| encryption_oracle(&[b'a'; 64]))
-        .all(|(ecb_used, ciphertext)| {
-            let detected_ecb = ciphertext.count_identical_runs(16) > 10;
-            ecb_used == detected_ecb
-        });
+    // Find block size of cipher
 
-    if detected_correctly {
-        println!("Oracle detects correctly");
+    let base_length = encryption_oracle(&[]).len();
+    let mut cipher_block_size = 0;
+
+    for pre_pad in 1.. {
+        let length = encryption_oracle(&vec![b'a'; pre_pad]).len();
+
+        if length != base_length {
+            cipher_block_size = length - base_length;
+            break;
+        }
     }
+
+    // Detect ECB
+
+    let uses_ecb = encryption_oracle(&vec![b'a'; 4 * cipher_block_size])
+        .count_identical_runs(cipher_block_size)
+        > 3;
+
+    println!("Uses ECB: {}\n", uses_ecb);
+
+    // Decrypt first block one byte at a time
+
+    let mut stage = vec![b'a'; 2 * base_length];
+    let range = (base_length - cipher_block_size)..base_length;
+
+    for start in 0..base_length {
+        let oracle = encryption_oracle(&stage[start..base_length - 1]);
+
+        for byte in 0..u8::MAX {
+            stage[start + base_length - 1] = byte;
+            let test = encryption_oracle(&stage[start..start + base_length]);
+
+            if oracle.bytes[range.clone()] == test.bytes[range.clone()] {
+                break;
+            }
+        }
+    }
+
+    let buffer = Buffer::new(&stage[base_length - 1..2 * base_length - 1]);
+
+    println!("{}", buffer);
 }
