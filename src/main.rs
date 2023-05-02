@@ -1,6 +1,7 @@
 mod base64;
 mod crypto;
 mod gliding_slice;
+mod key_value;
 mod linux_random;
 mod result_keeper;
 mod score;
@@ -11,6 +12,7 @@ use std::fmt;
 use std::fs;
 
 use gliding_slice::GlidingSlice;
+use key_value::KeyValue;
 use result_keeper::ResultKeeper;
 
 #[derive(Debug, Clone)]
@@ -288,47 +290,7 @@ fn encryption_oracle(plaintext: &[u8]) -> Buffer {
 }
 
 fn main() {
-    // Find block size of cipher
-
-    let base_length = encryption_oracle(&[]).len();
-    let mut cipher_block_size = 0;
-
-    for pre_pad in 1.. {
-        let length = encryption_oracle(&vec![b'a'; pre_pad]).len();
-
-        if length != base_length {
-            cipher_block_size = length - base_length;
-            break;
-        }
-    }
-
-    // Detect ECB
-
-    let uses_ecb = encryption_oracle(&vec![b'a'; 4 * cipher_block_size])
-        .count_identical_runs(cipher_block_size)
-        > 3;
-
-    println!("Uses ECB: {}\n", uses_ecb);
-
-    // Decrypt first block one byte at a time
-
-    let mut stage = vec![b'a'; 2 * base_length];
-    let range = (base_length - cipher_block_size)..base_length;
-
-    for start in 0..base_length {
-        let oracle = encryption_oracle(&stage[start..base_length - 1]);
-
-        for byte in 0..u8::MAX {
-            stage[start + base_length - 1] = byte;
-            let test = encryption_oracle(&stage[start..start + base_length]);
-
-            if oracle.bytes[range.clone()] == test.bytes[range.clone()] {
-                break;
-            }
-        }
-    }
-
-    let buffer = Buffer::new(&stage[base_length - 1..2 * base_length - 1]);
-
-    println!("{}", buffer);
+    let k = KeyValue::profile_for("foo@bar.com");
+    println!("{:?}", k);
+    println!("{}", k.encode());
 }
